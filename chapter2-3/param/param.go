@@ -21,59 +21,61 @@ const (
 	catchAll
 )
 
-type pathparamNode struct {
+type paramNode struct {
 	// パスパラメータは複数文字にわたる可能性があるため、stringに変更
 	path     string
-	children []*pathparamNode
+	children []*paramNode
 	// パスパラメータor通常の文字 を判定するフラグ
 	nType  nodeType
 	handle Handle
 }
 
-func extractPathparam(path []rune) (string, int, error) {
+func extractParam(path []rune) (string, int, error) {
 	if len(path) < 2 || path[0] != ':' || string(path) == ":/" {
 		return "", 0, fmt.Errorf("invalid path parameter")
 	}
-
 	for i := 1; i < len(path); i++ {
 		if path[i] == '/' {
 			return string(path[:i]), i, nil
+		}
+		if path[i] == '*' || path[i] == ':' {
+			return "", 0, fmt.Errorf("invalid character is in param name")
 		}
 	}
 	return string(path), len(path), nil
 }
 
-func (n *pathparamNode) addRoute(path string, handle Handle) {
+func (n *paramNode) addRoute(path string, handle Handle) {
 	n.addRoute_rune([]rune(path), handle)
 }
 
-func (n *pathparamNode) addRoute_rune(path []rune, handle Handle) {
+func (n *paramNode) addRoute_rune(path []rune, handle Handle) {
 	if len(path) == 0 {
 		n.handle = handle
 		return
 	}
 
 	if n.children == nil {
-		n.children = make([]*pathparamNode, 0)
+		n.children = make([]*paramNode, 0)
 	}
 
 	if string(path[0]) == ":" {
-		pathparam, pathLen, err := extractPathparam(path)
+		paramName, paramLen, err := extractParam(path)
 		if err != nil {
 			panic("Invalid path parameter")
 		}
-		n.checkWildcardConflict_Pathparam(pathparam)
-		n.handlePathparam(path, pathparam, pathLen, handle)
+		n.checkConflict_param(paramName)
+		n.handle_param(path, paramName, paramLen, handle)
 	} else {
-		n.checkWildcardConflict()
-		n.handleRegularPath(path, handle)
+		n.checkConflict_static(path[0])
+		n.handle_static(path, handle)
 	}
 }
 
-func (n *pathparamNode) handlePathparam(path []rune, pathparam string, pathLen int, handle Handle) {
+func (n *paramNode) handle_param(path []rune, paramName string, pathLen int, handle Handle) {
 	if len(n.children) == 0 {
-		nextNode := &pathparamNode{
-			path:  pathparam,
+		nextNode := &paramNode{
+			path:  paramName,
 			nType: param,
 		}
 		n.children = append(n.children, nextNode)
@@ -83,7 +85,7 @@ func (n *pathparamNode) handlePathparam(path []rune, pathparam string, pathLen i
 	}
 }
 
-func (n *pathparamNode) handleRegularPath(path []rune, handle Handle) {
+func (n *paramNode) handle_static(path []rune, handle Handle) {
 	next := string(path[0])
 
 	for _, child := range n.children {
@@ -93,36 +95,42 @@ func (n *pathparamNode) handleRegularPath(path []rune, handle Handle) {
 		}
 	}
 
-	nextNode := &pathparamNode{
+	nextNode := &paramNode{
 		path: next,
 	}
 	n.children = append(n.children, nextNode)
 	nextNode.addRoute_rune(path[1:], handle)
 }
 
-func (n *pathparamNode) checkWildcardConflict_Pathparam(pathparam string) {
-	if len(n.children) == 1 && n.children[0].nType == param && n.children[0].path == pathparam {
-		// 特例的に耐えるパターン
+func (n *paramNode) checkConflict_param(paramName string) {
+	if len(n.children) == 1 && n.children[0].nType == param && n.children[0].path == paramName {
 		return
 	}
-	// 基本的に子供がいるノードにパスパラメータは指定できない
-	if len(n.children) > 0 {
-		panic("Conflict with existing path parameter")
+	if n.nType == static && len(n.children) == 0 {
+		return
 	}
+	panic("Conflict with existing param")
 }
 
-func (n *pathparamNode) checkWildcardConflict() {
-	// 既にパスパラメータの子供がいる場合を除けば必ず追加できる
-	if len(n.children) == 1 && n.children[0].nType == param {
-		panic("Cannot insert a static node when a path parameter node is present")
+func (n *paramNode) checkConflict_static(str rune) {
+	if n.nType == static {
+		if !(len(n.children) == 1 && n.children[0].nType == param) {
+			return
+		}
 	}
+	if n.nType == param {
+		if str == '/' {
+			return
+		}
+	}
+	panic("Conflict with existing param")
 }
 
-func (n *pathparamNode) retrieve(path string) Handle {
+func (n *paramNode) retrieve(path string) Handle {
 	return n.retrieve_rune([]rune(path))
 }
 
-func (n *pathparamNode) retrieve_rune(path []rune) Handle {
+func (n *paramNode) retrieve_rune(path []rune) Handle {
 	if len(path) == 0 {
 		return n.handle
 	}

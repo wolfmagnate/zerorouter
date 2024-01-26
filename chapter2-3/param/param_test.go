@@ -18,7 +18,7 @@ func fakeHandler(val string) Handle {
 	}
 }
 
-func checkNode_Pathparam(t *testing.T, n *pathparamNode, expectedStr string, expectedChildren int) []*pathparamNode {
+func checkNode_Pathparam(t *testing.T, n *paramNode, expectedStr string, expectedChildren int) []*paramNode {
 	runes := []rune(expectedStr)
 	if len(runes) > 1 {
 		t.Errorf("Invalid expectedStr. It must have one rune.")
@@ -36,7 +36,7 @@ func checkNode_Pathparam(t *testing.T, n *pathparamNode, expectedStr string, exp
 	return nil
 }
 
-func checkHandler_Pathparam(t *testing.T, n *pathparamNode, expectedValue string) {
+func checkHandler_Pathparam(t *testing.T, n *paramNode, expectedValue string) {
 	if n.handle == nil {
 		t.Error("Expected handle at the last node to be non-nil")
 	} else {
@@ -47,7 +47,7 @@ func checkHandler_Pathparam(t *testing.T, n *pathparamNode, expectedValue string
 	}
 }
 
-func checkParamNode_Pathparam(t *testing.T, n *pathparamNode, expectedParam string, expectedChildren int) []*pathparamNode {
+func checkParamNode_Pathparam(t *testing.T, n *paramNode, expectedParam string, expectedChildren int) []*paramNode {
 	if n.nType != param {
 		t.Errorf("Expected node type to be param, got %v", n.nType)
 	}
@@ -64,7 +64,7 @@ func checkParamNode_Pathparam(t *testing.T, n *pathparamNode, expectedParam stri
 }
 
 func TestAddRoute_Pathparam_SinglePath(t *testing.T) {
-	n := &pathparamNode{}
+	n := &paramNode{}
 	n.addRoute("/ab/cd", fakeHandler("dummy"))
 
 	n = checkNode_Pathparam(t, n, "", 1)[0]
@@ -79,7 +79,7 @@ func TestAddRoute_Pathparam_SinglePath(t *testing.T) {
 }
 
 func TestAddRoute_Pathparam_MultiPath(t *testing.T) {
-	n := &pathparamNode{}
+	n := &paramNode{}
 	n.addRoute("/ab/cd", fakeHandler("dummy1"))
 	n.addRoute("/ab/ed", fakeHandler("dummy2"))
 
@@ -101,7 +101,7 @@ func TestAddRoute_Pathparam_MultiPath(t *testing.T) {
 }
 
 func TestAddRoute_Pathparam_SingleParam(t *testing.T) {
-	n := &pathparamNode{}
+	n := &paramNode{}
 	n.addRoute("/ab/:path/xyz", fakeHandler("dummy"))
 
 	n = checkNode_Pathparam(t, n, "", 1)[0]
@@ -119,7 +119,7 @@ func TestAddRoute_Pathparam_SingleParam(t *testing.T) {
 }
 
 func TestAddRoute_Pathparam_MultiParam(t *testing.T) {
-	n := &pathparamNode{}
+	n := &paramNode{}
 	n.addRoute("/ab/:path1/xyz", fakeHandler("dummy1"))
 	n.addRoute("/a/:path2", fakeHandler("dummy2"))
 
@@ -144,7 +144,7 @@ func TestAddRoute_Pathparam_MultiParam(t *testing.T) {
 }
 
 func TestAddRoute_Pathparam_MultiPathForSingleParam(t *testing.T) {
-	n := &pathparamNode{}
+	n := &paramNode{}
 	n.addRoute("/ab/:path/xyz", fakeHandler("dummy1"))
 	n.addRoute("/ab/:path/mn", fakeHandler("dummy2"))
 
