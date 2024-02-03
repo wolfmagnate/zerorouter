@@ -158,6 +158,9 @@ func (n *paramNode) retrieve_rune(path []rune) Handle {
 				return child.retrieve_rune(path[1:])
 			}
 		case param:
+			if path[0] == '/' {
+				return nil
+			}
 			end := 1
 			for end < len(path) && path[end] != '/' {
 				end++

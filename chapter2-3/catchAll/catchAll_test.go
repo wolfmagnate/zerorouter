@@ -28,9 +28,8 @@ func fakeHandler(val string) Handle {
 }
 
 func checkNode(t *testing.T, n *catchAllNode, expectedStr string, expectedChildren int) []*catchAllNode {
-	runes := []rune(expectedStr)
-	if len(runes) > 1 {
-		t.Errorf("Invalid expectedStr. It must have one rune.")
+	if n.nType != static {
+		t.Errorf("Expected node type to be static, got %v", n.nType)
 	}
 	if n.path != expectedStr {
 		t.Errorf("Expected string %s not found in node, got %s", expectedStr, n.path)
@@ -575,7 +574,6 @@ func TestAddRoute_CatchAll_10(t *testing.T) {
 
 func TestRetrieve(t *testing.T) {
 	n := &catchAllNode{}
-	// Existing test cases
 	n.addRoute("/a", fakeHandler("dummy1"))
 	n.addRoute("/a/:path", fakeHandler("dummy2"))
 	n.addRoute("/a/:path/*everything", fakeHandler("dummy3"))

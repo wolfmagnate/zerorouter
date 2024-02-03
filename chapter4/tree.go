@@ -253,19 +253,22 @@ func (n *node) retrieve_rune(path []rune, ps Params) (Handle, Params) {
 				return child.retrieve_rune(path[1:], ps)
 			}
 		case param:
+			if path[0] == '/' {
+				return nil, nil
+			}
 			end := 1
 			for end < len(path) && path[end] != '/' {
 				end++
 			}
 			ps = append(ps, Param{
-				Key:   n.path[1:],
+				Key:   child.path[1:],
 				Value: string(path[0:end]),
 			})
 			return child.retrieve_rune(path[end:], ps)
 		case catchAll:
 			if next == "/" {
 				ps = append(ps, Param{
-					Key:   n.path[2:],
+					Key:   child.path[2:],
 					Value: string(path),
 				})
 				return child.retrieve_rune(path[len(path):], ps)
@@ -305,6 +308,9 @@ func (n *node) retrieve_caseInsensitive_rune(path []rune, ps Params) (Handle, Pa
 				return handle_l, ps
 			}
 		case param:
+			if path[0] == '/' {
+				return nil, nil
+			}
 			end := 1
 			for end < len(path) && path[end] != '/' {
 				end++

@@ -20,12 +20,8 @@ func fakeHandler(val string) Handle {
 
 func checkNode(t *testing.T, n *simpleNode, expectedStr string, expectedChildren int) []*simpleNode {
 	runes := []rune(expectedStr)
-	if len(runes) > 1 {
-		t.Errorf("Invalid expectedStr. It must have one rune.")
-	}
 	var expectedRune rune
 	if len(runes) == 0 {
-		// nil文字に対応する
 		expectedRune = rune(0)
 	} else {
 		expectedRune = runes[0]
