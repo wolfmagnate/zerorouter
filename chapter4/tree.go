@@ -3,14 +3,12 @@
 // Use of this source code is governed by a BSD-style license that can be found
 // in the LICENSE file.
 
-package chapter2
+package chapter4
 
 import (
 	"fmt"
-	"net/http"
+	"unicode"
 )
-
-type Handle func(http.ResponseWriter, *http.Request)
 
 type nodeType uint8
 
@@ -21,9 +19,9 @@ const (
 	catchAll
 )
 
-type catchAllNode struct {
+type node struct {
 	path     string
-	children []*catchAllNode
+	children []*node
 	nType    nodeType
 	handle   Handle
 }
@@ -59,18 +57,18 @@ func extractCatchAll(path []rune) (string, int, error) {
 	return string(path), len(path), nil
 }
 
-func (n *catchAllNode) addRoute(path string, handle Handle) {
+func (n *node) addRoute(path string, handle Handle) {
 	n.addRoute_rune([]rune(path), handle)
 }
 
-func (n *catchAllNode) addRoute_rune(path []rune, handle Handle) {
+func (n *node) addRoute_rune(path []rune, handle Handle) {
 	if len(path) == 0 {
 		n.handle = handle
 		return
 	}
 
 	if n.children == nil {
-		n.children = make([]*catchAllNode, 0)
+		n.children = make([]*node, 0)
 	}
 
 	switch string(path[0]) {
@@ -101,9 +99,9 @@ func (n *catchAllNode) addRoute_rune(path []rune, handle Handle) {
 	}
 }
 
-func (n *catchAllNode) handle_param(path []rune, paramName string, pathLen int, handle Handle) {
+func (n *node) handle_param(path []rune, paramName string, pathLen int, handle Handle) {
 	if len(n.children) == 0 {
-		nextNode := &catchAllNode{
+		nextNode := &node{
 			path:  paramName,
 			nType: param,
 		}
@@ -114,7 +112,7 @@ func (n *catchAllNode) handle_param(path []rune, paramName string, pathLen int, 
 	}
 }
 
-func (n *catchAllNode) handle_static(path []rune, handle Handle) {
+func (n *node) handle_static(path []rune, handle Handle) {
 	next := string(path[0])
 
 	for _, child := range n.children {
@@ -124,21 +122,21 @@ func (n *catchAllNode) handle_static(path []rune, handle Handle) {
 		}
 	}
 
-	nextNode := &catchAllNode{
+	nextNode := &node{
 		path: next,
 	}
 	n.children = append(n.children, nextNode)
 	nextNode.addRoute_rune(path[1:], handle)
 }
 
-func (n *catchAllNode) handle_catchAll(path []rune, catchAllName string, pathLen int, handle Handle) {
+func (n *node) handle_catchAll(path []rune, catchAllName string, pathLen int, handle Handle) {
 	for _, child := range n.children {
 		if child.nType == catchAll && child.path == catchAllName {
 			child.addRoute_rune(path[pathLen:], handle)
 			return
 		}
 	}
-	nextNode := &catchAllNode{
+	nextNode := &node{
 		path:  catchAllName,
 		nType: catchAll,
 	}
@@ -147,12 +145,12 @@ func (n *catchAllNode) handle_catchAll(path []rune, catchAllName string, pathLen
 }
 
 type conflictPanic struct {
-	targetNode *catchAllNode
+	targetNode *node
 	newName    string
 	newType    nodeType
 }
 
-func (n *catchAllNode) checkConflict_static(str rune) {
+func (n *node) checkConflict_static(str rune) {
 	if n.nType == static {
 		containsParam := false
 		containsCatchAll := false
@@ -188,7 +186,7 @@ func (n *catchAllNode) checkConflict_static(str rune) {
 	})
 }
 
-func (n *catchAllNode) checkConflict_catchAll(catchAllName string) {
+func (n *node) checkConflict_catchAll(catchAllName string) {
 	if n.nType == static {
 		if len(n.children) == 0 {
 			return
@@ -225,7 +223,7 @@ func (n *catchAllNode) checkConflict_catchAll(catchAllName string) {
 	})
 }
 
-func (n *catchAllNode) checkConflict_param(paramName string) {
+func (n *node) checkConflict_param(paramName string) {
 	if len(n.children) == 1 && n.children[0].nType == param && n.children[0].path == paramName {
 		return
 	}
@@ -239,34 +237,93 @@ func (n *catchAllNode) checkConflict_param(paramName string) {
 	})
 }
 
-func (n *catchAllNode) retrieve(path string) Handle {
-	return n.retrieve_rune([]rune(path))
+func (n *node) retrieve(path string) (Handle, Params) {
+	return n.retrieve_rune([]rune(path), make(Params, 0))
 }
 
-func (n *catchAllNode) retrieve_rune(path []rune) Handle {
+func (n *node) retrieve_rune(path []rune, ps Params) (Handle, Params) {
 	if len(path) == 0 {
-		return n.handle
+		return n.handle, ps
 	}
-
 	next := string(path[0])
 	for _, child := range n.children {
 		switch child.nType {
 		case static:
 			if child.path == next {
-				return child.retrieve_rune(path[1:])
+				return child.retrieve_rune(path[1:], ps)
 			}
 		case param:
 			end := 1
 			for end < len(path) && path[end] != '/' {
 				end++
 			}
-			return n.children[0].retrieve_rune(path[end:])
+			ps = append(ps, Param{
+				Key:   n.path[1:],
+				Value: string(path[0:end]),
+			})
+			return child.retrieve_rune(path[end:], ps)
 		case catchAll:
 			if next == "/" {
-				return child.retrieve_rune(path[len(path):])
+				ps = append(ps, Param{
+					Key:   n.path[2:],
+					Value: string(path),
+				})
+				return child.retrieve_rune(path[len(path):], ps)
+			}
+		}
+	}
+	return nil, nil
+}
+
+func (n *node) retrieve_caseInsensitive(path string) (Handle, Params) {
+	return n.retrieve_caseInsensitive_rune([]rune(path), make(Params, 0))
+}
+func (n *node) retrieve_caseInsensitive_rune(path []rune, ps Params) (Handle, Params) {
+	if len(path) == 0 {
+		return n.handle, ps
+	}
+
+	next_u := string(unicode.ToUpper(path[0]))
+	next_l := string(unicode.ToLower(path[0]))
+	for _, child := range n.children {
+		switch child.nType {
+		case static:
+			var handle_u, handle_l Handle
+			var ps_u, ps_l Params
+			if child.path == next_u {
+				handle_u, ps_u = child.retrieve_caseInsensitive_rune(path[1:], make(Params, 0))
+			}
+			if child.path == next_l {
+				handle_l, ps_l = child.retrieve_caseInsensitive_rune(path[1:], make(Params, 0))
+			}
+			if handle_u != nil {
+				ps = append(ps, ps_u...)
+				return handle_u, ps
+			}
+			if handle_l != nil {
+				ps = append(ps, ps_l...)
+				return handle_l, ps
+			}
+		case param:
+			end := 1
+			for end < len(path) && path[end] != '/' {
+				end++
+			}
+			ps = append(ps, Param{
+				Key:   n.path[1:],
+				Value: string(path[0:end]),
+			})
+			return child.retrieve_caseInsensitive_rune(path[end:], ps)
+		case catchAll:
+			if next_u == "/" || next_l == "/" {
+				ps = append(ps, Param{
+					Key:   n.path[2:],
+					Value: string(path),
+				})
+				return child.retrieve_caseInsensitive_rune(path[len(path):], ps)
 			}
 		}
 	}
 
-	return nil
+	return nil, nil
 }

@@ -10,6 +10,15 @@ import (
 	"testing"
 )
 
+func catchPanic(testFunc func()) (recv interface{}) {
+	defer func() {
+		recv = recover()
+	}()
+
+	testFunc()
+	return
+}
+
 var fakeHandlerValue string
 
 func fakeHandler(val string) Handle {
@@ -61,6 +70,148 @@ func checkParamNode_Pathparam(t *testing.T, n *paramNode, expectedParam string, 
 	}
 
 	return n.children
+}
+
+func checkConflict(t *testing.T, recv any, parentType nodeType, parentName string, childType nodeType, childName string) {
+	conflict := recv.(conflictPanic)
+	if conflict.newName != childName {
+		t.Errorf("Expected childName to be '%s', got '%s'", childName, conflict.newName)
+	}
+	if conflict.newType != childType {
+		t.Errorf("Expected childType to be '%v', got '%v'", childType, conflict.newType)
+	}
+	if conflict.targetNode.path != parentName {
+		t.Errorf("Expected parentName to be '%s', got '%s'", parentName, conflict.targetNode.path)
+	}
+	if conflict.targetNode.nType != parentType {
+		t.Errorf("Expected parentType to be '%v', got '%v'", parentType, conflict.targetNode.nType)
+	}
+}
+
+// 親：static
+// 子：static
+func TestCheckConflict_1(t *testing.T) {
+	p := &paramNode{
+		path:  "a",
+		nType: static,
+	}
+	p.children = make([]*paramNode, 0)
+	p.checkConflict_static('b')
+}
+
+// 親：static
+// 子：param
+func TestCheckConflict_2(t *testing.T) {
+	p := &paramNode{
+		path:  "a",
+		nType: static,
+	}
+	p.children = make([]*paramNode, 0)
+	p.checkConflict_param(":path")
+}
+
+// 親：static
+// 子：複数のstatic
+func TestCheckConflict_3(t *testing.T) {
+	p := &paramNode{
+		path:  "a",
+		nType: static,
+	}
+	p.children = make([]*paramNode, 0)
+	c1 := &paramNode{
+		path:  "b",
+		nType: static,
+	}
+	p.children = append(p.children, c1)
+	p.checkConflict_static('c')
+}
+
+// 親：static
+// 子：static, param
+func TestCheckConflict_4(t *testing.T) {
+	p := &paramNode{
+		path:  "a",
+		nType: static,
+	}
+	p.children = make([]*paramNode, 0)
+	c1 := &paramNode{
+		path:  "b",
+		nType: static,
+	}
+	p.children = append(p.children, c1)
+	recv := catchPanic(func() {
+		p.checkConflict_param(":path")
+	})
+	checkConflict(t, recv, static, "a", param, ":path")
+}
+
+// 親：static
+// 子：static, param
+func TestCheckConflict_5(t *testing.T) {
+	p := &paramNode{
+		path:  "a",
+		nType: static,
+	}
+	p.children = make([]*paramNode, 0)
+	c1 := &paramNode{
+		path:  ":path",
+		nType: param,
+	}
+	p.children = append(p.children, c1)
+	p.checkConflict_param(":path")
+	recv := catchPanic(func() {
+		p.checkConflict_param(":another")
+	})
+	checkConflict(t, recv, static, "a", param, ":another")
+}
+
+// 親：param
+// 子：static
+func TestCheckConflict_6(t *testing.T) {
+	p := &paramNode{
+		path:  ":path",
+		nType: param,
+	}
+	p.children = make([]*paramNode, 0)
+	p.checkConflict_static('/')
+	recv := catchPanic(func() {
+		p.checkConflict_static('a')
+	})
+	checkConflict(t, recv, param, ":path", static, "a")
+}
+
+// 親：param
+// 子：param
+func TestCheckConflict_7(t *testing.T) {
+	p := &paramNode{
+		path:  ":path",
+		nType: param,
+	}
+	p.children = make([]*paramNode, 0)
+	recv := catchPanic(func() {
+		p.checkConflict_param(":another")
+	})
+	checkConflict(t, recv, param, ":path", param, ":another")
+}
+
+// 親：param
+// 子：static, param
+func TestCheckConflict_8(t *testing.T) {
+	p := &paramNode{
+		path:  ":path",
+		nType: param,
+	}
+	p.children = make([]*paramNode, 0)
+	p.checkConflict_static('/')
+	c := &paramNode{
+		path:  "/",
+		nType: static,
+	}
+	p.children = append(p.children, c)
+	recv := catchPanic(func() {
+		p.checkConflict_param(":path2")
+	})
+	checkConflict(t, recv, param, ":path", param, ":path2")
 }
 
 func TestAddRoute_Pathparam_SinglePath(t *testing.T) {

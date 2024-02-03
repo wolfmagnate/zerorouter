@@ -102,6 +102,12 @@ func (n *paramNode) handle_static(path []rune, handle Handle) {
 	nextNode.addRoute_rune(path[1:], handle)
 }
 
+type conflictPanic struct {
+	targetNode *paramNode
+	newName    string
+	newType    nodeType
+}
+
 func (n *paramNode) checkConflict_param(paramName string) {
 	if len(n.children) == 1 && n.children[0].nType == param && n.children[0].path == paramName {
 		return
@@ -109,7 +115,11 @@ func (n *paramNode) checkConflict_param(paramName string) {
 	if n.nType == static && len(n.children) == 0 {
 		return
 	}
-	panic("Conflict with existing param")
+	panic(conflictPanic{
+		targetNode: n,
+		newName:    paramName,
+		newType:    param,
+	})
 }
 
 func (n *paramNode) checkConflict_static(str rune) {
@@ -123,7 +133,11 @@ func (n *paramNode) checkConflict_static(str rune) {
 			return
 		}
 	}
-	panic("Conflict with existing param")
+	panic(conflictPanic{
+		targetNode: n,
+		newName:    string(str),
+		newType:    static,
+	})
 }
 
 func (n *paramNode) retrieve(path string) Handle {
@@ -138,17 +152,17 @@ func (n *paramNode) retrieve_rune(path []rune) Handle {
 	next := string(path[0])
 
 	for _, child := range n.children {
-		if child.nType == static {
+		switch child.nType {
+		case static:
 			if child.path == next {
 				return child.retrieve_rune(path[1:])
 			}
-		}
-		if n.children[0].nType == param {
+		case param:
 			end := 1
 			for end < len(path) && path[end] != '/' {
 				end++
 			}
-			return n.children[0].retrieve_rune(path[end:])
+			return child.retrieve_rune(path[end:])
 		}
 	}
 
