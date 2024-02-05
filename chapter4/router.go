@@ -5,14 +5,6 @@ import (
 	"path"
 )
 
-type Handle func(http.ResponseWriter, *http.Request, Params)
-
-type Param struct {
-	Key   string
-	Value string
-}
-type Params []Param
-
 type Router struct {
 	trees map[string]*node
 

@@ -3,13 +3,45 @@
 // Use of this source code is governed by a BSD-style license that can be found
 // in the LICENSE file.
 
-package chapter4
+package chapter6
 
 import (
 	"fmt"
 	"net/http"
-	"unicode"
+	"strings"
 )
+
+func min(a, b int) int {
+	if a <= b {
+		return a
+	}
+	return b
+}
+
+func longestCommonPrefix(a, b string) int {
+	i := 0
+	max := min(len(a), len(b))
+	for i < max && a[i] == b[i] {
+		i++
+	}
+	return i
+}
+
+func findNearbyWildcard(path string) int {
+	i1 := strings.Index(path, ":")
+	i2 := strings.Index(path, "/*")
+	if i1 == -1 && i2 == -1 {
+		return -1
+	}
+	if i1 != -1 && (i2 == -1 || i1 < i2) {
+		return i1
+	}
+	if i2 != -1 && (i1 == -1 || i2 < i1) {
+		return i2
+	}
+	// ここは無意味なコード
+	return -1
+}
 
 type Handle func(http.ResponseWriter, *http.Request, Params)
 
@@ -35,113 +67,148 @@ type node struct {
 	handle   Handle
 }
 
-func extractParam(path []rune) (string, int, error) {
-	if len(path) < 2 || path[0] != ':' || string(path) == ":/" {
+func extractParam(path string) (string, int, error) {
+	if len(path) < 2 || path[0] != ':' || path == ":/" {
 		return "", 0, fmt.Errorf("invalid path parameter")
 	}
 
 	for i := 1; i < len(path); i++ {
 		if path[i] == '/' {
-			return string(path[:i]), i, nil
+			return path[:i], i, nil
 		}
 		if path[i] == '*' || path[i] == ':' {
 			return "", 0, fmt.Errorf("invalid catchAll is in param name")
 		}
 	}
-	return string(path), len(path), nil
+	return path, len(path), nil
 }
-func extractCatchAll(path []rune) (string, int, error) {
-	if len(path) < 3 || string(path[0:2]) != "/*" || string(path) == "/*/" {
+
+func extractCatchAll(path string) (string, int, error) {
+	if len(path) < 3 || path[0:2] != "/*" || path == "/*/" {
 		return "", 0, fmt.Errorf("invalid catch-all parameter")
 	}
 
 	for i := 2; i < len(path); i++ {
 		if path[i] == '/' {
-			return string(path[:i]), i, nil
+			return path[:i], i, nil
 		}
 		if path[i] == '*' || path[i] == ':' {
 			return "", 0, fmt.Errorf("invalid param is in catchall name")
 		}
 	}
-	return string(path), len(path), nil
+	return path, len(path), nil
 }
 
 func (n *node) addRoute(path string, handle Handle) {
-	n.addRoute_rune([]rune(path), handle)
-}
-
-func (n *node) addRoute_rune(path []rune, handle Handle) {
-	if len(path) == 0 {
-		n.handle = handle
-		return
-	}
-
 	if n.children == nil {
 		n.children = make([]*node, 0)
 	}
 
-	switch string(path[0]) {
-	case ":":
-		paramName, paramLen, err := extractParam(path)
-		if err != nil {
-			panic("invalid parameter")
+	i := longestCommonPrefix(path, n.path)
+
+	// ノードの分割
+	if n.nType == static {
+		if i < len(n.path) {
+			prefix := n.path[:i]
+			suffix := n.path[i:]
+
+			child := &node{
+				path:     suffix,
+				nType:    static,
+				children: n.children,
+				handle:   n.handle,
+			}
+
+			n.children = []*node{child}
+			n.path = prefix
+			n.handle = nil
 		}
-		n.checkConflict_param(paramName)
-		n.handle_param(path, paramName, paramLen, handle)
-	case "/":
-		if len(path) == 1 || string(path[1]) != "*" {
-			n.checkConflict_static(path[0])
-			n.handle_static(path, handle)
-			return
-		}
-		catchAllName, pathLen, err := extractCatchAll(path)
-		if err != nil {
-			panic("invalid catchAll")
-		}
-		n.checkConflict_catchAll(catchAllName)
-		n.handle_catchAll(path, catchAllName, pathLen, handle)
-	case "*":
-		panic("catchAll pattern must be after slash")
-	default:
-		n.checkConflict_static(path[0])
-		n.handle_static(path, handle)
 	}
+
+	// パスの分割
+	if i < len(path) {
+		newPath := path[i:]
+
+		switch newPath[0] {
+		case ':':
+			paramName, paramLen, err := extractParam(newPath)
+			if err != nil {
+				panic("invalid parameter")
+			}
+			n.checkConflict_param(paramName)
+			n.handle_param(newPath, paramName, paramLen, handle)
+		case '/':
+			if len(newPath) == 1 || newPath[1] != '*' {
+				n.checkConflict_static(newPath)
+				n.handle_static(newPath, handle)
+				return
+			}
+			catchAllName, pathLen, err := extractCatchAll(newPath)
+			if err != nil {
+				panic("invalid catchAll")
+			}
+			n.checkConflict_catchAll(catchAllName)
+			n.handle_catchAll(newPath, catchAllName, pathLen, handle)
+		case '*':
+			panic("catchAll pattern must be after slash")
+		default:
+			n.checkConflict_static(newPath)
+			n.handle_static(newPath, handle)
+		}
+	} else {
+		n.handle = handle
+	}
+
 }
 
-func (n *node) handle_param(path []rune, paramName string, pathLen int, handle Handle) {
+func (n *node) handle_param(path, paramName string, pathLen int, handle Handle) {
 	if len(n.children) == 0 {
 		nextNode := &node{
 			path:  paramName,
 			nType: param,
 		}
 		n.children = append(n.children, nextNode)
-		nextNode.addRoute_rune(path[pathLen:], handle)
+		nextNode.addRoute(path, handle)
 	} else {
-		n.children[0].addRoute_rune(path[pathLen:], handle)
+		n.children[0].addRoute(path, handle)
 	}
 }
 
-func (n *node) handle_static(path []rune, handle Handle) {
-	next := string(path[0])
+func (n *node) handle_static(path string, handle Handle) {
+	next := path[0]
 
 	for _, child := range n.children {
-		if child.path == next {
-			child.addRoute_rune(path[1:], handle)
+		// 暗黙的にchildがstaticであることが確定する
+		if child.path[0] == next {
+			// split edgeのためにパス情報を与える
+			child.addRoute(path, handle)
 			return
 		}
 	}
 
+	// それ以外はノードを作成する
+	i := findNearbyWildcard(path)
+	if i == -1 {
+		nextNode := &node{
+			path:   path,
+			nType:  static,
+			handle: handle,
+		}
+		n.children = append(n.children, nextNode)
+		return
+	}
 	nextNode := &node{
-		path: next,
+		path:  path[:i],
+		nType: static,
 	}
 	n.children = append(n.children, nextNode)
-	nextNode.addRoute_rune(path[1:], handle)
+	nextNode.addRoute(path, handle)
 }
 
-func (n *node) handle_catchAll(path []rune, catchAllName string, pathLen int, handle Handle) {
+func (n *node) handle_catchAll(path string, catchAllName string, pathLen int, handle Handle) {
 	for _, child := range n.children {
 		if child.nType == catchAll && child.path == catchAllName {
-			child.addRoute_rune(path[pathLen:], handle)
+			child.addRoute(path, handle)
 			return
 		}
 	}
@@ -150,7 +217,7 @@ func (n *node) handle_catchAll(path []rune, catchAllName string, pathLen int, ha
 		nType: catchAll,
 	}
 	n.children = append(n.children, nextNode)
-	nextNode.addRoute_rune(path[pathLen:], handle)
+	nextNode.addRoute(path, handle)
 }
 
 type conflictPanic struct {
@@ -159,7 +226,7 @@ type conflictPanic struct {
 	newType    nodeType
 }
 
-func (n *node) checkConflict_static(str rune) {
+func (n *node) checkConflict_static(str string) {
 	if n.nType == static {
 		containsParam := false
 		containsCatchAll := false
@@ -174,12 +241,12 @@ func (n *node) checkConflict_static(str rune) {
 		if !(containsParam || containsCatchAll) {
 			return
 		}
-		if containsCatchAll && str != '/' {
+		if containsCatchAll && str[0] != '/' {
 			return
 		}
 	}
 
-	if n.nType == param && str == '/' {
+	if n.nType == param && str[0] == '/' {
 		if len(n.children) == 0 {
 			return
 		}
@@ -247,19 +314,18 @@ func (n *node) checkConflict_param(paramName string) {
 }
 
 func (n *node) retrieve(path string) (Handle, Params) {
-	return n.retrieve_rune([]rune(path), make(Params, 0))
+	return n.retrieve_rec(path, make(Params, 0))
 }
 
-func (n *node) retrieve_rune(path []rune, ps Params) (Handle, Params) {
+func (n *node) retrieve_rec(path string, ps Params) (Handle, Params) {
 	if len(path) == 0 {
 		return n.handle, ps
 	}
-	next := string(path[0])
 	for _, child := range n.children {
 		switch child.nType {
 		case static:
-			if child.path == next {
-				return child.retrieve_rune(path[1:], ps)
+			if child.path == path[:len(child.path)] {
+				return child.retrieve_rec(path[len(child.path):], ps)
 			}
 		case param:
 			if path[0] == '/' {
@@ -273,72 +339,16 @@ func (n *node) retrieve_rune(path []rune, ps Params) (Handle, Params) {
 				Key:   child.path[1:],
 				Value: string(path[0:end]),
 			})
-			return child.retrieve_rune(path[end:], ps)
+			return child.retrieve_rec(path[end:], ps)
 		case catchAll:
-			if next == "/" {
+			if path[0] == '/' {
 				ps = append(ps, Param{
 					Key:   child.path[2:],
 					Value: string(path),
 				})
-				return child.retrieve_rune(path[len(path):], ps)
+				return child.retrieve_rec(path[len(path):], ps)
 			}
 		}
 	}
-	return nil, nil
-}
-
-func (n *node) retrieve_caseInsensitive(path string) (Handle, Params) {
-	return n.retrieve_caseInsensitive_rune([]rune(path), make(Params, 0))
-}
-func (n *node) retrieve_caseInsensitive_rune(path []rune, ps Params) (Handle, Params) {
-	if len(path) == 0 {
-		return n.handle, ps
-	}
-
-	next_u := string(unicode.ToUpper(path[0]))
-	next_l := string(unicode.ToLower(path[0]))
-	for _, child := range n.children {
-		switch child.nType {
-		case static:
-			var handle_u, handle_l Handle
-			var ps_u, ps_l Params
-			if child.path == next_u {
-				handle_u, ps_u = child.retrieve_caseInsensitive_rune(path[1:], make(Params, 0))
-			}
-			if child.path == next_l {
-				handle_l, ps_l = child.retrieve_caseInsensitive_rune(path[1:], make(Params, 0))
-			}
-			if handle_u != nil {
-				ps = append(ps, ps_u...)
-				return handle_u, ps
-			}
-			if handle_l != nil {
-				ps = append(ps, ps_l...)
-				return handle_l, ps
-			}
-		case param:
-			if path[0] == '/' {
-				return nil, nil
-			}
-			end := 1
-			for end < len(path) && path[end] != '/' {
-				end++
-			}
-			ps = append(ps, Param{
-				Key:   n.path[1:],
-				Value: string(path[0:end]),
-			})
-			return child.retrieve_caseInsensitive_rune(path[end:], ps)
-		case catchAll:
-			if next_u == "/" || next_l == "/" {
-				ps = append(ps, Param{
-					Key:   n.path[2:],
-					Value: string(path),
-				})
-				return child.retrieve_caseInsensitive_rune(path[len(path):], ps)
-			}
-		}
-	}
-
 	return nil, nil
 }
