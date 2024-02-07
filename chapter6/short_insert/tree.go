@@ -49,22 +49,6 @@ func findWildcard(path string) (wildcard string, i int, valid bool) {
 	return "", -1, false
 }
 
-func findNearbyWildcard(path string) int {
-	i1 := strings.Index(path, ":")
-	i2 := strings.Index(path, "/*")
-	if i1 == -1 && i2 == -1 {
-		return -1
-	}
-	if i1 != -1 && (i2 == -1 || i1 < i2) {
-		return i1
-	}
-	if i2 != -1 && (i1 == -1 || i2 < i1) {
-		return i2
-	}
-	// ここは無意味なコード
-	return -1
-}
-
 type Handle func(http.ResponseWriter, *http.Request, Params)
 
 type Param struct {
@@ -337,7 +321,7 @@ func (n *node) checkConflict_catchAll(catchAllName string) {
 		containsSlashOrParam := false
 		containsAnotherCatchAll := false
 		for _, c := range n.children {
-			if c.nType == param || (c.nType == static && c.path == "/") {
+			if c.nType == param || (c.nType == static && c.path[0] == '/') {
 				containsSlashOrParam = true
 			}
 			if c.nType == catchAll && c.path != catchAllName {
@@ -378,10 +362,11 @@ func (n *node) checkConflict_param(paramName string) {
 }
 
 func (n *node) retrieve(path string) (Handle, Params) {
-	return n.retrieve_rec(path, make(Params, 0))
+	return n.retrieve_loop(path, make(Params, 0))
 }
 
-func (n *node) retrieve_rec(path string, ps Params) (Handle, Params) {
+func (n *node) retrieve_loop(path string, ps Params) (Handle, Params) {
+walk:
 	if len(path) == 0 {
 		return n.handle, ps
 	}
@@ -389,7 +374,9 @@ func (n *node) retrieve_rec(path string, ps Params) (Handle, Params) {
 		switch child.nType {
 		case static:
 			if child.path == path[:len(child.path)] {
-				return child.retrieve_rec(path[len(child.path):], ps)
+				n = child
+				path = path[len(child.path):]
+				goto walk
 			}
 		case param:
 			if path[0] == '/' {
@@ -403,14 +390,18 @@ func (n *node) retrieve_rec(path string, ps Params) (Handle, Params) {
 				Key:   child.path[1:],
 				Value: string(path[0:end]),
 			})
-			return child.retrieve_rec(path[end:], ps)
+			n = child
+			path = path[end:]
+			goto walk
 		case catchAll:
 			if path[0] == '/' {
 				ps = append(ps, Param{
 					Key:   child.path[2:],
 					Value: string(path),
 				})
-				return child.retrieve_rec(path[len(path):], ps)
+				n = child
+				path = path[len(path):]
+				goto walk
 			}
 		}
 	}

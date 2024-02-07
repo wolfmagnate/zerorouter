@@ -27,20 +27,26 @@ func longestCommonPrefix(a, b string) int {
 	return i
 }
 
-func findNearbyWildcard(path string) int {
+func findWildcard(path string) (wildcard string, i int, valid bool) {
 	i1 := strings.Index(path, ":")
 	i2 := strings.Index(path, "/*")
+
 	if i1 == -1 && i2 == -1 {
-		return -1
+		return "", -1, true
 	}
+
 	if i1 != -1 && (i2 == -1 || i1 < i2) {
-		return i1
+		wildcard, _, err := extractParam(path[i1:])
+		return wildcard, i1, err == nil
 	}
+
 	if i2 != -1 && (i1 == -1 || i2 < i1) {
-		return i2
+		wildcard, _, err := extractCatchAll(path[i2:])
+		return wildcard, i2, err == nil
 	}
+
 	// ここは無意味なコード
-	return -1
+	return "", -1, false
 }
 
 type Handle func(http.ResponseWriter, *http.Request, Params)
@@ -61,10 +67,13 @@ const (
 )
 
 type node struct {
-	path     string
-	children []*node
-	nType    nodeType
-	handle   Handle
+	path             string
+	children         []*node
+	nType            nodeType
+	handle           Handle
+	hasParamChild    bool
+	hasCatchAllChild bool
+	hasSlashChild    bool
 }
 
 func extractParam(path string) (string, int, error) {
@@ -100,6 +109,7 @@ func extractCatchAll(path string) (string, int, error) {
 }
 
 func (n *node) addRoute(path string, handle Handle) {
+walk:
 	if n.children == nil {
 		n.children = make([]*node, 0)
 	}
@@ -113,111 +123,168 @@ func (n *node) addRoute(path string, handle Handle) {
 			suffix := n.path[i:]
 
 			child := &node{
-				path:     suffix,
-				nType:    static,
-				children: n.children,
-				handle:   n.handle,
+				path:             suffix,
+				nType:            static,
+				children:         n.children,
+				handle:           n.handle,
+				hasParamChild:    n.hasParamChild,
+				hasCatchAllChild: n.hasCatchAllChild,
+				hasSlashChild:    n.hasSlashChild,
 			}
 
 			n.children = []*node{child}
 			n.path = prefix
 			n.handle = nil
+			n.hasParamChild = false
+			n.hasCatchAllChild = false
+			n.hasSlashChild = suffix[0] == '/'
 		}
 	}
 
 	// パスの分割
 	if i < len(path) {
-		newPath := path[i:]
+		path = path[i:]
 
-		switch newPath[0] {
+		switch path[0] {
 		case ':':
-			paramName, paramLen, err := extractParam(newPath)
+			paramName, _, err := extractParam(path)
 			if err != nil {
 				panic("invalid parameter")
 			}
 			n.checkConflict_param(paramName)
-			n.handle_param(newPath, paramName, paramLen, handle)
+
+			if len(n.children) == 0 {
+				// 挿入
+				n.insertChild(path, handle)
+			} else {
+				// 探索
+				n = n.children[0]
+				goto walk
+			}
 		case '/':
-			if len(newPath) == 1 || newPath[1] != '*' {
-				n.checkConflict_static(newPath)
-				n.handle_static(newPath, handle)
+			if len(path) == 1 || path[1] != '*' {
+				n.checkConflict_static(path)
+				next := path[0]
+				for _, child := range n.children {
+					if child.path[0] == next {
+						// 探索
+						n = child
+						goto walk
+					}
+				}
+				// 挿入
+				n.insertChild(path, handle)
 				return
 			}
-			catchAllName, pathLen, err := extractCatchAll(newPath)
+			catchAllName, _, err := extractCatchAll(path)
 			if err != nil {
 				panic("invalid catchAll")
 			}
 			n.checkConflict_catchAll(catchAllName)
-			n.handle_catchAll(newPath, catchAllName, pathLen, handle)
+			for _, child := range n.children {
+				if child.nType == catchAll && child.path == catchAllName {
+					// 探索
+					n = child
+					goto walk
+				}
+			}
+			// 挿入
+			n.insertChild(path, handle)
 		case '*':
 			panic("catchAll pattern must be after slash")
 		default:
-			n.checkConflict_static(newPath)
-			n.handle_static(newPath, handle)
+			n.checkConflict_static(path)
+			next := path[0]
+			for _, child := range n.children {
+				if child.path[0] == next {
+					// 探索
+					n = child
+					goto walk
+				}
+			}
+			// 挿入
+			n.insertChild(path, handle)
 		}
 	} else {
 		n.handle = handle
 	}
-
 }
 
-func (n *node) handle_param(path, paramName string, pathLen int, handle Handle) {
-	if len(n.children) == 0 {
-		nextNode := &node{
-			path:  paramName,
-			nType: param,
+func (n *node) insertChild(path string, handle Handle) {
+	child := &node{}
+	n.children = append(n.children, child)
+	parent := n
+	n = child
+	// 前提条件：空っぽのノードに対してpathを入れていくぞ！
+	// コンフリクトが絶対に起きないため、めちゃくちゃ条件判定を省ける
+	for {
+		wildcard, i, valid := findWildcard(path)
+		if i < 0 {
+			break
 		}
-		n.children = append(n.children, nextNode)
-		nextNode.addRoute(path, handle)
-	} else {
-		n.children[0].addRoute(path, handle)
-	}
-}
+		if !valid {
+			panic("invalid wildcard found")
+		}
 
-func (n *node) handle_static(path string, handle Handle) {
-	next := path[0]
+		if wildcard[0] == ':' {
+			if i > 0 {
+				n.path = path[:i]
+				path = path[i:]
+				child := &node{
+					nType: param,
+					path:  wildcard,
+				}
+				n.children = []*node{child}
+				n.hasParamChild = true
+				parent = n
+				n = child
+			} else {
+				// nがparamになる
+				n.nType = param
+				n.path = wildcard
+				parent.hasParamChild = true
+			}
 
-	for _, child := range n.children {
-		// 暗黙的にchildがstaticであることが確定する
-		if child.path[0] == next {
-			// split edgeのためにパス情報を与える
-			child.addRoute(path, handle)
+			// パラメータノードより深く行くとき
+			if len(wildcard) < len(path) {
+				path = path[len(wildcard):]
+				child := &node{}
+				n.children = []*node{child}
+				parent = n
+				n = child
+				continue
+			} else {
+				n.handle = handle
+			}
+			return
+		} else if wildcard[0:2] == "/*" {
+			// catchAll以降があったらエラー
+			if i+len(wildcard) != len(path) {
+				panic("catchAll must be the last pattern")
+			}
+			if i > 0 {
+				n.path = path[:i]
+				child := &node{
+					nType:  catchAll,
+					path:   wildcard,
+					handle: handle,
+				}
+				n.children = []*node{child}
+				n.hasCatchAllChild = true
+			} else {
+				n.path = wildcard
+				n.nType = catchAll
+				n.handle = handle
+				parent.hasCatchAllChild = true
+			}
 			return
 		}
 	}
-
-	// それ以外はノードを作成する
-	i := findNearbyWildcard(path)
-	if i == -1 {
-		nextNode := &node{
-			path:   path,
-			nType:  static,
-			handle: handle,
-		}
-		n.children = append(n.children, nextNode)
-		return
+	if path[0] == '/' {
+		parent.hasSlashChild = true
 	}
-	nextNode := &node{
-		path:  path[:i],
-		nType: static,
-	}
-	n.children = append(n.children, nextNode)
-	nextNode.addRoute(path, handle)
-}
-
-func (n *node) handle_catchAll(path string, catchAllName string, pathLen int, handle Handle) {
-	for _, child := range n.children {
-		if child.nType == catchAll && child.path == catchAllName {
-			child.addRoute(path, handle)
-			return
-		}
-	}
-	nextNode := &node{
-		path:  catchAllName,
-		nType: catchAll,
-	}
-	n.children = append(n.children, nextNode)
-	nextNode.addRoute(path, handle)
+	n.path = path
+	n.handle = handle
 }
 
 type conflictPanic struct {
@@ -228,20 +295,10 @@ type conflictPanic struct {
 
 func (n *node) checkConflict_static(str string) {
 	if n.nType == static {
-		containsParam := false
-		containsCatchAll := false
-		for _, c := range n.children {
-			if c.nType == param {
-				containsParam = true
-			}
-			if c.nType == catchAll {
-				containsCatchAll = true
-			}
-		}
-		if !(containsParam || containsCatchAll) {
+		if !(n.hasParamChild || n.hasCatchAllChild) {
 			return
 		}
-		if containsCatchAll && str[0] != '/' {
+		if n.hasCatchAllChild && str[0] != '/' {
 			return
 		}
 	}
@@ -270,17 +327,7 @@ func (n *node) checkConflict_catchAll(catchAllName string) {
 		if len(n.children) == 1 && n.children[0].nType == catchAll && n.children[0].path == catchAllName {
 			return
 		}
-		containsSlashOrParam := false
-		containsAnotherCatchAll := false
-		for _, c := range n.children {
-			if c.nType == param || (c.nType == static && c.path[0] == '/') {
-				containsSlashOrParam = true
-			}
-			if c.nType == catchAll && c.path != catchAllName {
-				containsAnotherCatchAll = true
-			}
-		}
-		if !containsSlashOrParam && !containsAnotherCatchAll {
+		if !n.hasSlashChild && !n.hasParamChild && !n.hasCatchAllChild {
 			return
 		}
 	}
@@ -314,10 +361,11 @@ func (n *node) checkConflict_param(paramName string) {
 }
 
 func (n *node) retrieve(path string) (Handle, Params) {
-	return n.retrieve_rec(path, make(Params, 0))
+	return n.retrieve_loop(path, make(Params, 0))
 }
 
-func (n *node) retrieve_rec(path string, ps Params) (Handle, Params) {
+func (n *node) retrieve_loop(path string, ps Params) (Handle, Params) {
+walk:
 	if len(path) == 0 {
 		return n.handle, ps
 	}
@@ -325,7 +373,9 @@ func (n *node) retrieve_rec(path string, ps Params) (Handle, Params) {
 		switch child.nType {
 		case static:
 			if child.path == path[:len(child.path)] {
-				return child.retrieve_rec(path[len(child.path):], ps)
+				n = child
+				path = path[len(child.path):]
+				goto walk
 			}
 		case param:
 			if path[0] == '/' {
@@ -339,14 +389,18 @@ func (n *node) retrieve_rec(path string, ps Params) (Handle, Params) {
 				Key:   child.path[1:],
 				Value: string(path[0:end]),
 			})
-			return child.retrieve_rec(path[end:], ps)
+			n = child
+			path = path[end:]
+			goto walk
 		case catchAll:
 			if path[0] == '/' {
 				ps = append(ps, Param{
 					Key:   child.path[2:],
 					Value: string(path),
 				})
-				return child.retrieve_rec(path[len(path):], ps)
+				n = child
+				path = path[len(path):]
+				goto walk
 			}
 		}
 	}
