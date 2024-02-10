@@ -21,7 +21,7 @@ func (r *Router) allowed(path string) string {
 			if method == http.MethodOptions {
 				continue
 			}
-			handle := r.trees[method].retrieve_nil(path)
+			handle := r.trees[method].retrieve_noparam(path)
 			if handle != nil {
 				allowed = append(allowed, method)
 			}

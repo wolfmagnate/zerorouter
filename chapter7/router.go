@@ -30,8 +30,12 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	urlPath := req.URL.Path
 	if root := r.trees[req.Method]; root != nil {
 		if handle, ps := root.retrieve(urlPath, r.getParams); handle != nil {
-			handle(w, req, *ps)
-			r.putParams(ps)
+			if ps != nil {
+				handle(w, req, *ps)
+				r.putParams(ps)
+			} else {
+				handle(w, req, nil)
+			}
 			return
 		} else if urlPath != "/" {
 			code := http.StatusMovedPermanently
@@ -40,7 +44,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			}
 			if r.RedirectFixedPath {
 				fixedPath := path.Clean(urlPath)
-				if handle := root.retrieve_nil(fixedPath); handle != nil {
+				if handle := root.retrieve_noparam(fixedPath); handle != nil {
 					req.URL.Path = fixedPath
 					http.Redirect(w, req, req.URL.String(), code)
 					return

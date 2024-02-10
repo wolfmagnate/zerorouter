@@ -13,7 +13,9 @@ func (r *Router) saveMatchedRoutePath(path string, handle Handle) Handle {
 			handle(w, req, ps)
 			r.putParams(psp)
 		} else {
-			ps = append(ps, Param{Key: MatchedRoutePathParam, Value: path})
+			i := len(ps)
+			ps = ps[:i+1]
+			ps[i] = Param{Key: MatchedRoutePathParam, Value: path}
 			handle(w, req, ps)
 		}
 	}

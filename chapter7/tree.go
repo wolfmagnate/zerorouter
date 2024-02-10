@@ -405,7 +405,7 @@ type nilParamsProvider struct{}
 func (n *nilParamsProvider) add(p Param)        {}
 func (n *nilParamsProvider) getParams() *Params { return nil }
 
-func (n *node) retrieve_nil(path string) Handle {
+func (n *node) retrieve_noparam(path string) Handle {
 	handle, _ := n._retrieve(path, &nilParamsProvider{})
 	return handle
 }
