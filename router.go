@@ -82,6 +82,15 @@ func (r *Router) Handle(method, path string, handle Handle) {
 	}
 }
 
+func (ps Params) ByName(name string) string {
+	for _, p := range ps {
+		if p.Key == name {
+			return p.Value
+		}
+	}
+	return ""
+}
+
 type paramsKey struct{}
 
 var ParamsKey = paramsKey{}
