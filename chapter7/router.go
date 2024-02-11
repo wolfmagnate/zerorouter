@@ -1,3 +1,7 @@
+// Copyright 2024 進捗ゼミ. All rights reserved.
+// Based on the path package, Copyright 2009 The Go Authors.
+// Use of this source code is governed by a BSD-style license that can be found
+// in the LICENSE file.
 package chapter7
 
 import (
@@ -13,10 +17,8 @@ type Router struct {
 	HandleMethodNotAllowed bool
 	SaveMatchedRoutePath   bool
 	RedirectFixedPath      bool
-	// スライスへのポインタ
-	paramsPool sync.Pool
-	// 1つのパスに対して存在する最大のパラメータ数
-	maxParams int
+	paramsPool             sync.Pool
+	maxParams              int
 }
 
 func New() *Router {

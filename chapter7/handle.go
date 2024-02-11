@@ -1,3 +1,7 @@
+// Copyright 2024 進捗ゼミ. All rights reserved.
+// Based on the path package, Copyright 2009 The Go Authors.
+// Use of this source code is governed by a BSD-style license that can be found
+// in the LICENSE file.
 package chapter7
 
 import "net/http"
@@ -63,10 +67,8 @@ func (r *Router) Handle(method, path string, handle Handle) {
 		r.maxParams = paramsCount + varsCount
 	}
 
-	// New自体の作成もlazy
 	if r.paramsPool.New == nil && r.maxParams > 0 {
 		r.paramsPool.New = func() interface{} {
-			// 呼ばれるタイミングはServeHTTP、つまりHandleが全部終わったタイミング。これもlazy
 			ps := make(Params, 0, r.maxParams)
 			return &ps
 		}
