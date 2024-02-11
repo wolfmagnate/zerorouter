@@ -127,38 +127,37 @@ func (n *node) addRoute(path string, handle Handle) {
 
 	// パスの分割
 	if i < len(path) {
-		newPath := path[i:]
+		path = path[i:]
 
-		switch newPath[0] {
+		switch path[0] {
 		case ':':
-			paramName, paramLen, err := extractParam(newPath)
+			paramName, paramLen, err := extractParam(path)
 			if err != nil {
 				panic("invalid parameter")
 			}
 			n.checkConflict_param(paramName)
-			n.handle_param(newPath, paramName, paramLen, handle)
+			n.handle_param(path, paramName, paramLen, handle)
 		case '/':
-			if len(newPath) == 1 || newPath[1] != '*' {
-				n.checkConflict_static(newPath)
-				n.handle_static(newPath, handle)
+			if len(path) == 1 || path[1] != '*' {
+				n.checkConflict_static(path)
+				n.handle_static(path, handle)
 				return
 			}
-			catchAllName, pathLen, err := extractCatchAll(newPath)
+			catchAllName, pathLen, err := extractCatchAll(path)
 			if err != nil {
 				panic("invalid catchAll")
 			}
 			n.checkConflict_catchAll(catchAllName)
-			n.handle_catchAll(newPath, catchAllName, pathLen, handle)
+			n.handle_catchAll(path, catchAllName, pathLen, handle)
 		case '*':
 			panic("catchAll pattern must be after slash")
 		default:
-			n.checkConflict_static(newPath)
-			n.handle_static(newPath, handle)
+			n.checkConflict_static(path)
+			n.handle_static(path, handle)
 		}
 	} else {
 		n.handle = handle
 	}
-
 }
 
 func (n *node) handle_param(path, paramName string, pathLen int, handle Handle) {

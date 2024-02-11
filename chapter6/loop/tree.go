@@ -145,11 +145,11 @@ walk:
 					nType: param,
 				}
 				n.children = append(n.children, nextNode)
-				// nextNode.addRoute(newPath, handle)
+				// nextNode.addRoute(path, handle)
 				n = nextNode
 				goto walk
 			} else {
-				// n.children[0].addRoute(newPath, handle)
+				// n.children[0].addRoute(path, handle)
 				n = n.children[0]
 				goto walk
 			}
@@ -284,7 +284,7 @@ func (n *node) checkConflict_static(str string) {
 
 	panic(conflictPanic{
 		targetNode: n,
-		newName:    string(str),
+		newName:    str,
 		newType:    static,
 	})
 }
@@ -367,7 +367,7 @@ walk:
 			}
 			ps = append(ps, Param{
 				Key:   child.path[1:],
-				Value: string(path[0:end]),
+				Value: path[0:end],
 			})
 			n = child
 			path = path[end:]
@@ -376,7 +376,7 @@ walk:
 			if path[0] == '/' {
 				ps = append(ps, Param{
 					Key:   child.path[2:],
-					Value: string(path),
+					Value: path,
 				})
 				n = child
 				path = path[len(path):]

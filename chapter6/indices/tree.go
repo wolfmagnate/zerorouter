@@ -69,7 +69,7 @@ const (
 type node struct {
 	path             string
 	children         []*node
-	indices          string
+	indices          []byte
 	nType            nodeType
 	handle           Handle
 	hasParamChild    bool
@@ -113,6 +113,7 @@ func (n *node) addRoute(path string, handle Handle) {
 walk:
 	if n.children == nil {
 		n.children = make([]*node, 0)
+		n.indices = make([]byte, 0)
 	}
 
 	i := longestCommonPrefix(path, n.path)
@@ -135,7 +136,7 @@ walk:
 			}
 
 			n.children = []*node{child}
-			n.indices = string(suffix[0])
+			n.indices = []byte{suffix[0]}
 			n.path = prefix
 			n.handle = nil
 			n.hasParamChild = false
@@ -168,7 +169,7 @@ walk:
 			if len(path) == 1 || path[1] != '*' {
 				n.checkConflict_static(path)
 				next := path[0]
-				for i, c := range []byte(n.indices) {
+				for i, c := range n.indices {
 					if c == next {
 						// 探索
 						n = n.children[i]
@@ -184,11 +185,13 @@ walk:
 				panic("invalid catchAll")
 			}
 			n.checkConflict_catchAll(catchAllName)
-			for i, c := range []byte(n.indices) {
-				if c == '*' && n.children[i].path == catchAllName {
-					// 探索
-					n = n.children[i]
-					goto walk
+			if n.hasCatchAllChild {
+				for i, c := range n.indices {
+					if c == '*' && n.children[i].path == catchAllName {
+						// 探索
+						n = n.children[i]
+						goto walk
+					}
 				}
 			}
 			// 挿入
@@ -198,7 +201,7 @@ walk:
 		default:
 			n.checkConflict_static(path)
 			next := path[0]
-			for i, c := range []byte(n.indices) {
+			for i, c := range n.indices {
 				if c == next {
 					// 探索
 					n = n.children[i]
@@ -218,12 +221,16 @@ func (n *node) insertChild(path string, handle Handle) {
 	n.children = append(n.children, child)
 	parent := n
 	n = child
-	// 前提条件：空っぽのノードに対してpathを入れていくぞ！
-	// コンフリクトが絶対に起きないため、めちゃくちゃ条件判定を省ける
 	for {
 		wildcard, i, valid := findWildcard(path)
 		if i < 0 {
-			break
+			if path[0] == '/' {
+				parent.hasSlashChild = true
+			}
+			parent.indices = append(parent.indices, path[0])
+			n.path = path
+			n.handle = handle
+			return
 		}
 		if !valid {
 			panic("invalid wildcard found")
@@ -232,14 +239,14 @@ func (n *node) insertChild(path string, handle Handle) {
 		if wildcard[0] == ':' {
 			if i > 0 {
 				n.path = path[:i]
-				parent.indices += string(path[0])
+				parent.indices = append(parent.indices, path[0])
 				path = path[i:]
 				child := &node{
 					nType: param,
 					path:  wildcard,
 				}
 				n.children = []*node{child}
-				n.indices = ":"
+				n.indices = []byte{':'}
 				n.hasParamChild = true
 				parent = n
 				n = child
@@ -248,7 +255,7 @@ func (n *node) insertChild(path string, handle Handle) {
 				n.nType = param
 				n.path = wildcard
 				parent.hasParamChild = true
-				parent.indices += ":"
+				parent.indices = append(parent.indices, ':')
 			}
 
 			// パラメータノードより深く行くとき
@@ -256,6 +263,7 @@ func (n *node) insertChild(path string, handle Handle) {
 				path = path[len(wildcard):]
 				child := &node{}
 				n.children = []*node{child}
+				n.indices = make([]byte, 0)
 				// この時点ではchildが何になるか分からないからindicesは設定できない
 				parent = n
 				n = child
@@ -265,37 +273,30 @@ func (n *node) insertChild(path string, handle Handle) {
 			}
 			return
 		} else if wildcard[0:2] == "/*" {
-			// catchAll以降があったらエラー
 			if i+len(wildcard) != len(path) {
 				panic("catchAll must be the last pattern")
 			}
 			if i > 0 {
 				n.path = path[:i]
-				parent.indices += string(path[0])
+				parent.indices = append(parent.indices, path[0])
 				child := &node{
 					nType:  catchAll,
 					path:   wildcard,
 					handle: handle,
 				}
 				n.children = []*node{child}
-				n.indices = "*"
+				n.indices = []byte{'*'}
 				n.hasCatchAllChild = true
 			} else {
 				n.path = wildcard
 				n.nType = catchAll
 				n.handle = handle
 				parent.hasCatchAllChild = true
-				parent.indices += "*"
+				parent.indices = append(parent.indices, '*')
 			}
 			return
 		}
 	}
-	if path[0] == '/' {
-		parent.hasSlashChild = true
-	}
-	parent.indices += string(path[0])
-	n.path = path
-	n.handle = handle
 }
 
 type conflictPanic struct {
@@ -325,7 +326,7 @@ func (n *node) checkConflict_static(str string) {
 
 	panic(conflictPanic{
 		targetNode: n,
-		newName:    string(str),
+		newName:    str,
 		newType:    static,
 	})
 }
@@ -398,7 +399,7 @@ walk:
 			}
 			ps = append(ps, Param{
 				Key:   child.path[1:],
-				Value: string(path[0:end]),
+				Value: path[0:end],
 			})
 			n = child
 			path = path[end:]
@@ -407,7 +408,7 @@ walk:
 			if path[0] == '/' {
 				ps = append(ps, Param{
 					Key:   child.path[2:],
-					Value: string(path),
+					Value: path,
 				})
 				n = child
 				path = path[len(path):]

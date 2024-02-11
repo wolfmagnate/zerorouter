@@ -215,12 +215,15 @@ func (n *node) insertChild(path string, handle Handle) {
 	n.children = append(n.children, child)
 	parent := n
 	n = child
-	// 前提条件：空っぽのノードに対してpathを入れていくぞ！
-	// コンフリクトが絶対に起きないため、めちゃくちゃ条件判定を省ける
 	for {
 		wildcard, i, valid := findWildcard(path)
 		if i < 0 {
-			break
+			if path[0] == '/' {
+				parent.hasSlashChild = true
+			}
+			n.path = path
+			n.handle = handle
+			return
 		}
 		if !valid {
 			panic("invalid wildcard found")
@@ -236,6 +239,9 @@ func (n *node) insertChild(path string, handle Handle) {
 				}
 				n.children = []*node{child}
 				n.hasParamChild = true
+				if path[0] == '/' {
+					parent.hasSlashChild = true
+				}
 				parent = n
 				n = child
 			} else {
@@ -271,6 +277,9 @@ func (n *node) insertChild(path string, handle Handle) {
 				}
 				n.children = []*node{child}
 				n.hasCatchAllChild = true
+				if path[0] == '/' {
+					parent.hasSlashChild = true
+				}
 			} else {
 				n.path = wildcard
 				n.nType = catchAll
@@ -280,11 +289,6 @@ func (n *node) insertChild(path string, handle Handle) {
 			return
 		}
 	}
-	if path[0] == '/' {
-		parent.hasSlashChild = true
-	}
-	n.path = path
-	n.handle = handle
 }
 
 type conflictPanic struct {
@@ -314,7 +318,7 @@ func (n *node) checkConflict_static(str string) {
 
 	panic(conflictPanic{
 		targetNode: n,
-		newName:    string(str),
+		newName:    str,
 		newType:    static,
 	})
 }
@@ -387,7 +391,7 @@ walk:
 			}
 			ps = append(ps, Param{
 				Key:   child.path[1:],
-				Value: string(path[0:end]),
+				Value: path[0:end],
 			})
 			n = child
 			path = path[end:]
@@ -396,7 +400,7 @@ walk:
 			if path[0] == '/' {
 				ps = append(ps, Param{
 					Key:   child.path[2:],
-					Value: string(path),
+					Value: path,
 				})
 				n = child
 				path = path[len(path):]
